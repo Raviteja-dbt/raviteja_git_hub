@@ -1,0 +1,158 @@
+Project: Enterprise Data Lake
+Role: Data warehouse engineer
+Environment: Big Data, Snowflake, RedHatLinux, GCP, AWS.
+Roles & Responsibilities:
+ 	Implemented, Configured, and maintained Snowflake data warehouse.
+ 	Developed the ETL data pipelines using SnowSQL, Snowpipe, Tasks and Streams.
+ 	Configured Internal and External stages for loading the data.
+ 	Implemented Bulk Loading, Unloading with Structured and semi-structured datasets. 
+ 	Worked on zero copy clones, task scheduling, setting up notifications.
+ 	Configured user management with Roles, DAC, RBAC in Snowflake.
+ 	Excellent understanding of Snowflake internals and integration of Snowflake with data processing and reporting BI tools.
+ 	Supported multiple production data warehouse platforms.
+ 	Worked on issues related to data loading, data transformations and data exports.
+ 	Performed detail assessments of current state data platforms and created an appropriate transition path to Snowflake.
+ 	Developed scripts Python scripts to do Extract, Load and Transform data.
+ 	Wrote SQL’s, Stored procedures, and views.
+ 	Gathered end user requirements, created and updated technical specifications for Data warehouse.
+ 	Worked with the advisory team to understand the requirements and helped in writing the test cases.
+ 	Worked on the data migrations between the Snowflake and GCS.
+ 	Experienced on SQL worked with relational databases, query optimization.
+
+Project: Enterprise Data Lake – End-to-End Pipeline
+Client: Confidential (large enterprise, assumed to be in Healthcare/Finance/Manufacturing sector)
+Role: Data Warehouse Engineer
+Environment: Snowflake, GCP, AWS S3, Python, BigQuery (optional), RedHat Linux
+
+1.Data Extraction from Source Systems
+-------------------------------------
+Data was extracted from: On-prem RDBMS (Oracle, SQL Server)
+
+Flat files (CSV, JSON, Avro), APIs (e.g., Salesforce or internal microservices)
+
+Sample Python Extraction Script (Structured Data)
+-------------------------------------------------
+import cx_Oracle
+import pandas as pd
+
+conn = cx_Oracle.connect("user/password@dbhost:1521/ORCL")
+query = "SELECT * FROM customer_transactions WHERE txn_date >= SYSDATE - 1"
+df = pd.read_sql(query, conn)
+df.to_csv("/mnt/data/customer_transactions.csv", index=False)
+conn.close()
+
+2. Load to GCS or AWS S3 (External Staging Area)
+-----------------------------------------------
+AWS S3 Upload (via Python/Boto3):
+--------------------------------
+import boto3
+s3 = boto3.client('s3')
+s3.upload_file('/mnt/data/customer_transactions.csv',
+               'enterprise-datalake-bucket',
+               'staging/customer_transactions.csv')
+			   
+3. Snowflake Configuration (External Stage + File Format)
+---------------------------------------------------------
+External Stage (GCS or S3):
+--------------------------
+CREATE OR REPLACE STAGE ext_stage_customer_txns
+  URL = 's3://enterprise-datalake-bucket/staging/'
+  STORAGE_INTEGRATION = my_s3_integration;
+  
+File Format
+-----------
+CREATE OR REPLACE FILE FORMAT csv_format
+  TYPE = 'CSV'
+  FIELD_DELIMITER = ','
+  SKIP_HEADER = 1
+  NULL_IF = ('NULL', 'null', '');
+  
+4. Snowpipe for Continuous Ingestion
+------------------------------------
+CREATE OR REPLACE PIPE pipe_load_customer_txns
+  AUTO_INGEST = TRUE
+  AS
+  COPY INTO staging.customer_txns
+  FROM @ext_stage_customer_txns
+  FILE_FORMAT = (FORMAT_NAME = csv_format)
+  ON_ERROR = CONTINUE;
+  
+Configured SNS/SQS (for S3) or Pub/Sub (for GCS) to auto-trigger the pipe.
+
+Enabled monitoring via LOAD_HISTORY.
+
+5. Transformation: Streams + Tasks
+----------------------------------
+Create a Stream:
+----------------
+CREATE OR REPLACE STREAM stream_customer_txns
+  ON TABLE staging.customer_txns;
+  
+Task for Incremental Load:
+-------------------------
+CREATE OR REPLACE TASK task_transform_customer_txns
+  WAREHOUSE = compute_wh
+  SCHEDULE = '5 MINUTE'
+AS
+  INSERT INTO dw.customer_facts (
+    customer_id,
+    transaction_id,
+    txn_date,
+    amount,
+    channel
+  )
+  SELECT customer_id, transaction_id, txn_date, amount, channel
+  FROM stream_customer_txns
+  WHERE METADATA$ACTION = 'INSERT';
+  
+6. Governance: Roles, DAC, RBAC, Security
+------------------------------------------
+Role creation and masking
+-------------------------
+CREATE ROLE analyst_role;
+GRANT SELECT ON dw.customer_facts TO ROLE analyst_role;
+
+Data masking
+------------
+CREATE OR REPLACE MASKING POLICY mask_sensitive_data
+  AS (val STRING) RETURNS STRING ->
+    CASE WHEN CURRENT_ROLE() IN ('SECURE_ROLE') THEN val ELSE '****' END;
+
+ALTER TABLE dw.customer_facts  MODIFY COLUMN customer_email SET MASKING POLICY mask_sensitive_data;
+  
+7. Zero Copy Cloning for UAT/SIT
+---------------------------------
+CREATE OR REPLACE DATABASE uat_clone CLONE prod_db;
+Used for testing transformations without affecting production.
+
+8. Data Export (Unload)
+-----------------------
+COPY INTO @ext_stage_exports/customer_summary_202507.csv
+FROM (
+  SELECT * FROM dw.customer_summary
+)
+FILE_FORMAT = (FORMAT_NAME = csv_format)
+OVERWRITE = TRUE;
+
+
+Summary Pipeline Architecture:
+------------------------------
+[Oracle / CSV / API]  
+      ↓ (Python, Informatica)  
+[GCS or AWS S3 Staging]  
+      ↓  
+[Snowflake External Stage + File Format]  
+      ↓ (Snowpipe)  
+[Staging Tables]  
+      ↓ (Streams & Tasks)  
+[Data Warehouse Schema: Facts/Dimensions]  
+      ↓ (Secure Views)  
+[BI Tools, Data Consumers]
+
+Outcome
+-------
+Reduced ingestion latency by 70% using Snowpipe & task scheduling.
+
+Enabled secure reporting by implementing RBAC + Dynamic Masking.
+
+Improved cost efficiency using zero-copy clones for non-prod environments.
